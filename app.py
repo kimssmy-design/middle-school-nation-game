@@ -3,8 +3,8 @@ import pandas as pd
 import plotly.express as px
 import time
 
-# 1. 페이지 설정 및 디자인 (태블릿 최적화)
-st.set_page_config(page_title="국가 경영 게임", layout="centered", initial_sidebar_state="collapsed")
+# 1. 페이지 설정 및 CSS
+st.set_page_config(page_title="국가 경영 시뮬레이션", layout="centered", initial_sidebar_state="collapsed")
 
 st.markdown("""
     <style>
@@ -15,185 +15,205 @@ st.markdown("""
         margin-bottom: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);
     }
     .stButton>button {
-        width: 100%; height: 90px !important; font-size: 20px !important;
-        font-weight: bold; border-radius: 15px !important; margin-bottom: 10px;
+        width: 100%; height: 70px !important; font-size: 18px !important;
+        font-weight: bold; border-radius: 12px !important; margin-bottom: 8px;
     }
     .stats-card {
         background-color: #f1f3f5; padding: 8px; border-radius: 10px;
-        text-align: center; font-size: 13px; font-weight: bold;
+        text-align: center; font-size: 12px; font-weight: bold;
     }
-    .warning-flash {
-        background-color: #ff4b4b; height: 15px; width: 100%;
-        border-radius: 10px; margin-bottom: 10px; animation: blink 0.5s 2;
+    .danger-stat { background-color: #ff4b4b !important; color: white; animation: pulse 0.6s infinite; }
+    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
+    
+    .warning-box {
+        background-color: #001529; color: white; padding: 30px; 
+        border-radius: 20px; border: 3px solid #ff4b4b; margin-bottom: 20px;
     }
-    @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
-    .analysis-box {
-        padding: 20px; border-radius: 15px; background-color: #f8f9fa;
-        border-left: 8px solid #1E3A8A; margin-top: 20px; line-height: 1.6;
+    .score-display {
+        font-size: 50px; font-weight: 900; color: #1E3A8A; text-align: center;
+        margin: 20px 0; font-family: 'Courier New', Courier, monospace;
     }
+    .rain { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 9999; }
+    .drop { position: absolute; width: 2px; height: 15px; background: rgba(0, 100, 255, 0.4); animation: fall 0.7s linear infinite; }
+    @keyframes fall { to { transform: translateY(100vh); } }
     </style>
     """, unsafe_allow_html=True)
 
-# 2. 세션 초기화
+def rain_effect():
+    rain_html = '<div class="rain">'
+    for i in range(40):
+        left = i * 2.5; delay = (i % 5) * 0.2
+        rain_html += f'<div class="drop" style="left: {left}%; animation-delay: {delay}s;"></div>'
+    rain_html += '</div>'
+    st.markdown(rain_html, unsafe_allow_html=True)
+
+# 2. 세션 데이터 관리
 if 'step' not in st.session_state:
     st.session_state.step = 0
-    st.session_state.stats = {
-        "사회통합": 10, "경제력": 10, "국방력": 10, "사회복지": 10, "교육연구": 10,
-        "외교": 10, "국민행복": 10, "환경지속성": 10, "개인의 자유": 10, "법질서": 10
-    }
+    st.session_state.stats = {"사회통합": 10, "경제력": 10, "국방력": 10, "사회복지": 10, "교육연구": 10, "외교": 10, "국민행복": 10, "환경지속성": 10, "개인의 자유": 10, "법질서": 10}
     st.session_state.history = []
     st.session_state.student_info = {"id": "", "name": "", "nation": ""}
+    st.session_state.game_over = False
 
-# 3. 전체 시나리오 데이터 (15개 상황 + 6개 돌발)
+# 3. 시나리오 데이터 (trigger_title 방식 적용)
 scenarios = [
-    {"title": "📍 상황 1. AI 판사 도입", "desc": "사법 신뢰 회복을 위해 판결을 기계에 맡길까요?", "A": "💡 AI 판사 도입 (공정성)", "B": "⚖️ 인간 판사 고수 (존엄성)", "effA": {"법질서": 15, "개인의 자유": -15}, "effB": {"개인의 자유": 15, "법질서": -10}, "type": "normal"},
-    {"title": "🚨 돌발 1. 알고리즘 오류", "desc": "이전 선택의 결과입니다.", "type": "event", "trigger_idx": 0, "A_res": "AI가 특정 지역 거주자에게 가혹한 판결을 내려 시위가 발생했습니다!", "B_res": "재판 지연으로 범죄자들이 활개를 친다는 여론이 형성됩니다.", "effA": {"사회통합": -20, "국민행복": -15}, "effB": {"법질서": -10}},
-    {"title": "📍 상황 2. 탄소세 강력 도입", "desc": "환경 보호를 위해 기업에 막대한 세금을 매길까요?", "A": "🌿 강력 규제 (환경 우선)", "B": "🏭 규제 완화 (경제 우선)", "effA": {"환경지속성": 20, "경제력": -15}, "effB": {"경제력": 20, "환경지속성": -20}, "type": "normal"},
-    {"title": "📍 상황 3. 지능형 CCTV 전국 설치", "desc": "범죄 예방을 위해 모든 거리에 감시 카메라를 설치할까요?", "A": "📸 전국 설치 (치안 강화)", "B": "❌ 설치 제한 (사생활 보호)", "effA": {"법질서": 20, "개인의 자유": -20}, "effB": {"개인의 자유": 15, "법질서": -15}, "type": "normal"},
-    {"title": "🚨 돌발 2. 사생활 침해 스캔들", "desc": "CCTV 설치 여부에 따른 여론입니다.", "type": "event", "trigger_idx": 3, "A_res": "정부가 CCTV로 야당 정치인을 사찰했다는 의혹이 터졌습니다!", "B_res": "CCTV 사각지대에서 강력 범죄가 발생해 국민들이 불안해합니다.", "effA": {"개인의 자유": -20, "사회통합": -15}, "effB": {"국민행복": -15, "법질서": -10}},
-    {"title": "📍 상황 4. 보편적 기본소득", "desc": "모든 국민에게 매달 일정 금액을 지급하시겠습니까?", "A": "💰 전 국민 지급 (복지 확대)", "B": "🔬 인재 집중 투자 (국가 성장)", "effA": {"사회복지": 25, "사회통합": 15, "경제력": -20}, "effB": {"경제력": 20, "교육연구": 20, "사회통합": -15}, "type": "normal"},
-    {"title": "📍 상황 5. 동맹국 파병 요청", "desc": "동맹국이 전쟁 중입니다. 우리 군을 보낼까요?", "A": "🎖️ 파병 결정 (외교 의리)", "B": "🙅 파병 거부 (국민 안전)", "effA": {"외교": 20, "국방력": 15, "국민행복": -25}, "effB": {"국민행복": 15, "외교": -20}, "type": "normal"},
-    {"title": "🚨 돌발 3. 파병 장병 희생", "desc": "파병 결정에 따른 긴급 속보입니다.", "type": "event", "trigger_idx": 6, "A_res": "파병지에서 안타까운 인명 피해 소식이 들려와 반전 시위가 일어납니다.", "B_res": "외교적 고립으로 인해 주요 자원 수입 가격이 폭등합니다.", "effA": {"사회통합": -25, "국민행복": -15}, "effB": {"경제력": -20, "외교": -10}},
-    {"title": "📍 상황 6. 외국인 노동자 대거 수용", "desc": "부족한 노동력을 채우기 위해 이민 문턱을 낮출까요?", "A": "🌍 적극 수용 (경제 활성화)", "B": "🔒 수용 제한 (사회적 안정)", "effA": {"경제력": 20, "외교": 10, "사회통합": -20}, "effB": {"사회통합": 15, "경제력": -15}, "type": "normal"},
-    {"title": "📍 상황 7. 징병제 vs 모병제 전환", "desc": "국가 안보와 개인의 선택권 중 무엇을 고르시겠습니까?", "A": "🛡️ 징병제 유지 (강력한 국방)", "B": "🦅 모병제 전환 (직업의 자유)", "effA": {"국방력": 20, "개인의 자유": -15}, "effB": {"개인의 자유": 20, "국방력": -25}, "type": "normal"},
-    {"title": "🚨 돌발 4. 국경 인근 무력 충돌", "desc": "현재 국방력 수치에 따른 결과입니다.", "type": "event", "trigger_idx": 9, "A_res": "강력한 군사력으로 도발을 즉각 제압하고 안정을 찾았습니다.", "B_res": "대비 부족으로 주요 시설이 점령당하고 국가 비상사태가 선포됩니다.", "effA": {"법질서": 15, "외교": 10}, "effB": {"국방력": -20, "국민행복": -25}},
-    {"title": "📍 상황 8. 부동산 가격 상한제", "desc": "집값을 잡기 위해 정부가 가격을 통제할까요?", "A": "🏠 강력 개입 (주거 복지)", "B": "📈 시장 자율 (자유 경제)", "effA": {"사회복지": 20, "사회통합": 10, "경제력": -20}, "effB": {"경제력": 20, "개인의 자유": 10, "사회복지": -15}, "type": "normal"},
-    {"title": "📍 상황 9. 원자력 발전소 건설", "desc": "값싼 에너지 공급을 위해 원전을 추가로 지을까요?", "A": "☢️ 원전 증설 (에너지 안보)", "B": "🍃 신재생 에너지 (지속 가능성)", "effA": {"경제력": 20, "환경지속성": -25}, "effB": {"환경지속성": 25, "경제력": -20}, "type": "normal"},
-    {"title": "🚨 돌발 5. 에너지 공급 위기", "desc": "현재 경제력/환경 수치에 따른 결과입니다.", "type": "event", "trigger_idx": 12, "A_res": "충분한 전력 공급 덕분에 공장들이 풀가동되며 수출이 늘어납니다.", "B_res": "전력 부족으로 순환 정전이 발생하여 국가 마비 사태가 일어납니다.", "effA": {"경제력": 15}, "effB": {"경제력": -30, "사회복지": -10}},
-    {"title": "📍 상황 10. 온라인 처벌법 도입", "desc": "악플과 가짜뉴스를 정부가 직접 처벌하게 할까요?", "A": "⚖️ 엄격 처벌 (사회 정화)", "B": "📢 표현 보호 (자유 보장)", "effA": {"사회통합": 15, "법질서": 15, "개인의 자유": -20}, "effB": {"개인의 자유": 20, "사회통합": -15}, "type": "normal"},
-    {"title": "📍 상황 11. 무상 교육/급식 확대", "desc": "세금을 높여 모든 학생에게 혜택을 줄까요?", "A": "🍱 전면 무상 (평등 가치)", "B": "📉 선별 지원 (재정 건전성)", "effA": {"사회복지": 20, "사회통합": 15, "경제력": -15}, "effB": {"경제력": 15, "사회복지": -10}, "type": "normal"},
-    {"title": "📍 상황 12. 우주 개발 프로젝트", "desc": "미래를 보고 우주 정거장 건설에 투자할까요?", "A": "🚀 우주 투자 (미래 기술)", "B": "🏥 공공 의료 (당장의 복지)", "effA": {"교육연구": 25, "경제력": 10, "사회복지": -15}, "effB": {"사회복지": 20, "교육연구": -15}, "type": "normal"},
-    {"title": "🚨 돌발 6. 전염병 대유행", "desc": "사회복지/의료 수치에 따른 결과입니다.", "type": "event", "trigger_idx": 17, "A_res": "미래 기술과 연구 인프라 덕분에 백신을 빠르게 개발했습니다.", "B_res": "탄탄한 공공 의료망 덕분에 의료 붕괴 없이 위기를 넘겼습니다.", "effA": {"교육연구": 20, "국민행복": 10}, "effB": {"사회복지": 20, "사회통합": 10}},
-    {"title": "📍 상황 13. 고교 학점제 전면 실시", "desc": "학생들에게 과목 선택권을 완전히 줄까요?", "A": "🏫 자율 선택 (학생 중심)", "B": "📔 필수 지정 (기초 학력)", "effA": {"개인의 자유": 15, "교육연구": 10, "법질서": -10}, "effB": {"교육연구": 15, "법질서": 10, "개인의 자유": -15}, "type": "normal"},
-    {"title": "📍 상황 14. 독자 핵무장 논의", "desc": "국가 생존을 위해 독자적인 핵개발을 시작할까요?", "A": "💥 핵무기 개발 (자주 국방)", "B": "🤝 동맹 강화 (외교적 해결)", "effA": {"국방력": 40, "외교": -40, "경제력": -20}, "effB": {"외교": 25, "경제력": 10, "국방력": -20}, "type": "normal"},
-    {"title": "📍 상황 15. 마지막 선택: 국가의 미래", "desc": "우리 나라는 어떤 방향으로 나아가야 할까요?", "A": "🦅 강한 성장과 자유", "B": "🏠 따뜻한 분배와 평등", "effA": {"경제력": 30, "개인의 자유": 20, "사회복지": -20}, "effB": {"사회복지": 30, "사회통합": 20, "경제력": -20}, "type": "normal"}
+    {"title": "📍 상황 1. AI 판사 도입", "desc": "사법 신뢰 회복을 위해 판결을 기계에 맡길까요?", "choices": {"A": "💡 도입 (공정성)", "B": "⚖️ 고수 (존엄성)"}, "eff": {"A": {"법질서": 45, "국민행복": 20, "개인의 자유": -25}, "B": {"개인의 자유": 40, "사회통합": 25, "법질서": -20}}, "type": "normal"},
+    {"title": "📍 상황 2. 탄소세 강력 도입", "desc": "환경 보호를 위해 기업에 환경 부담금을 매길까요?", "choices": {"A": "🌿 강력 규제", "B": "🏭 규제 완화"}, "eff": {"A": {"환경지속성": 50, "교육연구": 25, "경제력": -35}, "B": {"경제력": 45, "국민행복": 20, "환경지속성": -30}}, "type": "normal"},
+    {"title": "📍 상황 3. 지능형 CCTV 전국 설치", "desc": "치안을 위해 모든 거리에 감시 카메라를 설치할까요?", "choices": {"A": "📸 전국 설치", "B": "❌ 설치 제한"}, "eff": {"A": {"법질서": 45, "국민행복": 20, "개인의 자유": -30}, "B": {"개인의 자유": 40, "사회통합": 25, "법질서": -25}}, "type": "normal"},
+    {"title": "📍 상황 4. 보편적 기본소득", "desc": "모든 국민에게 매달 일정 금액을 지급하시겠습니까?", "choices": {"A": "💰 보편 지급", "B": "🔬 인재 투자"}, "eff": {"A": {"사회복지": 55, "국민행복": 35, "경제력": -40}, "B": {"경제력": 50, "교육연구": 45, "사회복지": -25}}, "type": "normal"},
+    {"title": "📍 상황 5. 동맹국 파병 요청", "desc": "동맹국이 전쟁 중입니다. 우리 군을 보낼까요?", "choices": {"A": "🎖️ 파병 결정", "B": "🙅 파병 거부"}, "eff": {"A": {"외교": 55, "국방력": 40, "국민행복": -35}, "B": {"국민행복": 35, "사회통합": 30, "외교": -40}}, "type": "normal"},
+    {"title": "🚨 돌발 1. 기술 혁신의 결실", "desc": "국가 정책의 영향으로 예상치 못한 결과가 발생했습니다!", "type": "event", "trigger_title": "📍 상황 4. 보편적 기본소득", "A_res": "기본소득이 소비 진작으로 이어져 경제가 활성화됩니다!", "B_res": "집중 투자한 인재들이 세계적인 발명을 해냈습니다!", "effA": {"경제력": 40, "국민행복": 25}, "effB": {"교육연구": 50, "경제력": 35}},
+    {"title": "📍 상황 6. 외국인 노동자 대거 수용", "desc": "노동력 확보를 위해 이민 문턱을 낮출까요?", "choices": {"A": "🌍 적극 수용", "B": "🔒 수용 제한"}, "eff": {"A": {"경제력": 40, "사회복지": 20, "사회통합": -45}, "B": {"사회통합": 35, "법질서": 25, "경제력": -40}}, "type": "normal"},
+    {"title": "📍 상황 7. 징병제 vs 모병제", "desc": "국가 안보 시스템의 방향을 선택하세요.", "choices": {"A": "🛡️ 징병제 유지", "B": "🦅 모병제 전환"}, "eff": {"A": {"국방력": 35, "법질서": 15, "개인의 자유": -35}, "B": {"개인의 자유": 40, "국민행복": 25, "국방력": -45}}, "type": "normal"},
+    {"title": "🚨 돌발 2. 국경 무력 충돌", "desc": "접경 지역에서 교전이 발생했습니다!", "type": "event", "trigger_title": "📍 상황 7. 징병제 vs 모병제", "A_res": "탄탄한 병력으로 적을 즉각 퇴치하고 승리했습니다.", "B_res": "병력 부족으로 영토 일부가 점령당하는 수모를 겪습니다.", "effA": {"국방력": 30, "국민행복": 20}, "effB": {"국방력": -60, "국민행복": -55}},
+    {"title": "📍 상황 8. 부동산 가격 상한제", "desc": "정부가 집값의 한도를 정해 강제 통제할까요?", "choices": {"A": "🏠 강력 개입", "B": "📈 시장 자율"}, "eff": {"A": {"사회복지": 35, "사회통합": 20, "경제력": -45}, "B": {"경제력": 40, "개인의 자유": 25, "사회복지": -40}}, "type": "normal"},
+    {"title": "📍 상황 9. 원자력 발전소 건설", "desc": "에너지 확보를 위해 원전을 더 지을까요?", "choices": {"A": "☢️ 원전 증설", "B": "🍃 신재생 전환"}, "eff": {"A": {"경제력": 45, "국방력": 15, "환경지속성": -50}, "B": {"환경지속성": 45, "국민행복": 20, "경제력": -45}}, "type": "normal"},
+    {"title": "🚨 돌발 3. 에너지 대란", "desc": "국제 에너지 가격이 폭등했습니다!", "type": "event", "trigger_title": "📍 상황 9. 원자력 발전소 건설", "A_res": "원전의 안정적 공급 덕분에 위기를 무사히 넘깁니다.", "B_res": "전력 부족으로 순환 정전이 발생해 국가 기능이 마비됩니다.", "effA": {"경제력": 30, "국민행복": 10}, "effB": {"경제력": -60, "사회복지": -45}},
+    {"title": "📍 상황 10. 온라인 처벌법 도입", "desc": "악플과 가짜뉴스를 국가가 직접 처벌할까요?", "choices": {"A": "⚖️ 엄격 처벌", "B": "📢 표현 보호"}, "eff": {"A": {"사회통합": 30, "법질서": 25, "개인의 자유": -45}, "B": {"개인의 자유": 40, "국민행복": 20, "사회통합": -40}}, "type": "normal"},
+    {"title": "📍 상황 11. 무상 교육/급식 확대", "desc": "세금을 더 걷어 모든 학생에게 무상 혜택을 줄까요?", "choices": {"A": "🍱 전면 무상", "B": "📉 선별 지원"}, "eff": {"A": {"사회복지": 40, "국민행복": 25, "경제력": -45}, "B": {"경제력": 35, "교육연구": 25, "사회복지": -40}}, "type": "normal"},
+    {"title": "📍 상황 12. 우주 개발 프로젝트", "desc": "막대한 예산을 들여 화성 탐사에 도전할까요?", "choices": {"A": "🚀 우주 투자", "B": "🏥 의료 투자"}, "eff": {"A": {"교육연구": 50, "국방력": 25, "경제력": -45}, "B": {"사회복지": 40, "국민행복": 30, "교육연구": -40}}, "type": "normal"},
+    {"title": "🚨 돌발 4. 전염병 팬데믹", "desc": "신종 바이러스가 전국으로 확산되고 있습니다!", "type": "event", "trigger_title": "📍 상황 12. 우주 개발 프로젝트", "A_res": "미래 기술 인프라를 활용해 백신 개발에 성공합니다.", "B_res": "탄탄한 공공 의료망 덕분에 피해를 최소화하며 막아냅니다.", "effA": {"교육연구": 35, "경제력": 20}, "effB": {"사회복지": 35, "사회통합": 25}},
+    {"title": "📍 상황 13. 고교 학점제", "desc": "학생들에게 완전한 과목 선택권을 보장할까요?", "choices": {"A": "🏫 자율 선택", "B": "📔 필수 지정"}, "eff": {"A": {"개인의 자유": 35, "국민행복": 25, "교육연구": -40}, "B": {"교육연구": 35, "법질서": 25, "개인의 자유": -45}}, "type": "normal"},
+    {"title": "📍 상황 14. 독자 핵무장", "desc": "국가 생존을 위해 핵무기 개발을 시작할까요?", "choices": {"A": "💥 핵개발 시작", "B": "🤝 동맹 강화"}, "eff": {"A": {"국방력": 75, "외교": -80, "경제력": -50}, "B": {"외교": 50, "경제력": 25, "국방력": -55}}, "type": "normal"},
+    {"title": "📍 상황 15. 국가의 미래 비전", "desc": "우리 나라는 어떤 가치를 최우선으로 해야 할까요?", "choices": {"A": "🦅 자유와 성장", "B": "🏠 평등과 공생"}, "eff": {"A": {"경제력": 65, "개인의 자유": 45, "사회복지": -55}, "B": {"사회복지": 65, "사회통합": 45, "경제력": -55}}, "type": "normal"},
+    {"title": "🚨 돌발 5. 외교적 마찰", "desc": "우리의 비전 선포 이후 주변국의 반응이 엇갈립니다.", "type": "event", "trigger_title": "📍 상황 15. 국가의 미래 비전", "A_res": "성장 잠재력을 높이 평가한 외국 자본이 유입됩니다.", "B_res": "국제 사회에서 인도주의적 리더로 찬사받습니다.", "effA": {"경제력": 40, "외교": 20}, "effB": {"사회통합": 30, "외교": 40}},
+    {"title": "📍 상황 16. 국가 운영 카지노 도입", "desc": "세수 확보를 위해 국가 카지노를 운영할까요?", "choices": {"A": "🎰 전면 허용", "B": "🎟️ 제한 허용", "C": "🚫 절대 금지"}, "eff": {"A": {"경제력": 55, "법질서": -60}, "B": {"경제력": 30, "법질서": -35, "국민행복": 10}, "C": {"법질서": 40, "경제력": -50}}, "type": "normal"},
+    {"title": "📍 상황 17. 대형 산불 피해 지원", "desc": "피해 지역을 어떻게 지원할까요?", "choices": {"A": "💸 전액 현금 보상", "B": "🏗️ 시설 복구 지원", "C": "🛡️ 보험 의무화"}, "eff": {"A": {"사회복지": 50, "경제력": -55}, "B": {"사회복지": 30, "환경지속성": 25, "경제력": -45}, "C": {"법질서": 30, "경제력": -35}}, "type": "normal"},
+    {"title": "📍 상황 18. 노키즈존 규제 법안", "desc": "업체의 노키즈존 설정을 규제할까요?", "choices": {"A": "📜 규제 도입", "B": "🏢 자율 운영", "C": "👶 혜택 부여"}, "eff": {"A": {"사회통합": 45, "사회복지": 25, "개인의 자유": -50}, "B": {"개인의 자유": 45, "경제력": 25, "사회통합": -55}, "C": {"사회복지": 35, "경제력": -40}}, "type": "normal"},
+    {"title": "🚨 돌발 6. 재난 예산 고갈", "desc": "연이은 지원책으로 재정이 바닥났습니다!", "type": "event", "trigger_title": "📍 상황 17. 대형 산불 피해 지원", "A_res": "현금 보상안이 독이 되어 물가가 폭등하고 재정이 위태롭습니다.", "B_res": "시설 복구에 집중하느라 현금이 부족해 신용이 하락합니다.", "C_res": "미리 도입한 보험 시스템 덕분에 타격 없이 위기를 넘깁니다!", "effA": {"경제력": -65, "사회통합": -40}, "effB": {"경제력": -55, "국민행복": -40}, "effC": {"경제력": 25, "법질서": 25}}
 ]
+
+def check_game_over():
+    for k, v in st.session_state.stats.items():
+        if v <= -120: return k
+    return None
 
 # --- 실행 로직 ---
 
-if st.session_state.step == 0:
-    st.markdown("<h1 style='text-align:center;'>🏛️ 국가 경영 게임</h1>", unsafe_allow_html=True)
+if st.session_state.game_over:
+    failed_reason = check_game_over()
+    st.markdown(f"<div style='background:black; color:red; padding:50px; text-align:center;'><h1>☠️ 패 망</h1><p>{st.session_state.student_info['nation']} 붕괴 (원인: {failed_reason})</p></div>", unsafe_allow_html=True)
+    if st.button("과거로 회귀하여 다시 도전"):
+        for k in list(st.session_state.keys()): del st.session_state[k]
+        st.rerun()
+
+elif st.session_state.step == 0:
+    st.markdown("<h1 style='text-align:center;'>🏛️ 국가 경영 시뮬레이션</h1>", unsafe_allow_html=True)
     with st.form("login"):
-        sid = st.text_input("학번 (4자리)", max_chars=4)
-        sname = st.text_input("이름")
-        snation = st.text_input("국가 명칭")
-        if st.form_submit_button("운영 시작", use_container_width=True):
-            if len(sid) == 4 and sname and snation:
-                st.session_state.student_info = {"id": sid, "name": sname, "nation": snation}
-                st.session_state.step = 1; st.rerun()
+        sid = st.text_input("학번 (4자리)"); sname = st.text_input("성명"); snation = st.text_input("국가 명칭")
+        if st.form_submit_button("국정 운영 시작"):
+            if sid and sname and snation:
+                st.session_state.student_info = {"id": sid, "name": sname, "nation": snation}; st.session_state.step = 0.5; st.rerun()
+
+elif st.session_state.step == 0.5:
+    st.markdown(f"""
+    <div class='warning-box'>
+        <p style='font-size:22px; color:#ff4b4b; font-weight:bold;'>⚠️ 경고: 난이도가 대폭 상승했습니다!</p>
+        <p style='font-size:18px;'><b>{st.session_state.student_info['name']} 지도자님,</b><br>
+        이제 더 이상 관용은 없습니다. 한 번의 실수가 국가의 운명을 결정합니다.</p>
+        <hr style='border:1px solid #333;'>
+        <ul style='font-size:16px; color:#ffcccc;'>
+            <li><b>멸망 조건:</b> 단 하나라도 <b>-120점</b>에 도달하면 즉각 패망합니다.</li>
+            <li><b>분석:</b> 마지막 단계에서 당신의 통치 스타일을 <b>자유와 평등</b>의 가치를 중심으로 정밀 분석해 드립니다.</li>
+        </ul>
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button("지옥의 국정 운영 시작"): st.session_state.step = 1; st.rerun()
 
 elif 1 <= st.session_state.step <= len(scenarios):
-    q = scenarios[st.session_state.step - 1]
-    st.progress(st.session_state.step / len(scenarios))
-    st.markdown(f"<div class='scenario-container'><h3>{q['title']}</h3><hr><p style='font-size:21px; line-height:1.6;'>{q['desc']}</p></div>", unsafe_allow_html=True)
+    if check_game_over(): st.session_state.game_over = True; st.rerun()
+    q = scenarios[int(st.session_state.step) - 1]
+    
+    # 🚨 돌발 상황 처리
+    if q.get("type") == "event":
+        trigger_title = q['trigger_title']
+        user_choice_record = next((h for h in st.session_state.history if h['title'] == trigger_title), None)
+        
+        if user_choice_record:
+            trigger_choice = user_choice_record['key']
+            res_text = q.get(f"{trigger_choice}_res", "분석 중...")
+            eff = q.get(f"eff{trigger_choice}", {})
+        else:
+            res_text = "기록을 찾을 수 없습니다."; eff = {}
+        
+        st.markdown(f"<div class='scenario-container' style='border-top: 10px solid #ff4b4b;'><h4>{q['title']}</h4><hr><p style='font-size:19px;'><b>{res_text}</b></p></div>", unsafe_allow_html=True)
+        
+        if st.button("상황 수습 및 계속"):
+            # 🔔 돌발 상황 스탯 변화 팝업
+            toast_msg = "🚨 [돌발 상황 결과] " + ", ".join([f"{k} {v:+}" for k, v in eff.items()])
+            st.toast(toast_msg)
+            
+            for k, v in eff.items(): st.session_state.stats[k] += v
+            st.session_state.step += 1; st.rerun()
+            
+    # 📍 일반 상황 처리
+    else:
+        st.progress(st.session_state.step / len(scenarios))
+        st.markdown(f"<div class='scenario-container'><h4>상황 {st.session_state.step}</h4><h3>{q['title']}</h3><hr><p style='font-size:19px;'>{q['desc']}</p></div>", unsafe_allow_html=True)
 
-    if q['type'] == "normal":
-        col_a, col_b = st.columns(1), st.columns(1) # 태블릿용 단일 컬럼
-        if st.button(q['A']):
-            eff = q['effA']; score_sum = sum(eff.values()); res_txt = ", ".join([f"{k} {v:+d}" for k, v in eff.items()])
-            if score_sum >= 0: st.balloons(); st.toast(f"✅ 완료: {res_txt}", icon="🎉")
-            else: st.markdown("<div class='warning-flash'></div>", unsafe_allow_html=True); st.toast(f"⚡ 경보: {res_txt}", icon="⚠️")
-            for k, v in eff.items(): st.session_state.stats[k] += v
-            st.session_state.history.append("A"); st.session_state.step += 1; time.sleep(1.2); st.rerun()
-        if st.button(q['B']):
-            eff = q['effB']; score_sum = sum(eff.values()); res_txt = ", ".join([f"{k} {v:+d}" for k, v in eff.items()])
-            if score_sum >= 0: st.balloons(); st.toast(f"✅ 완료: {res_txt}", icon="🎉")
-            else: st.markdown("<div class='warning-flash'></div>", unsafe_allow_html=True); st.toast(f"⚡ 경보: {res_txt}", icon="⚠️")
-            for k, v in eff.items(): st.session_state.stats[k] += v
-            st.session_state.history.append("B"); st.session_state.step += 1; time.sleep(1.2); st.rerun()
+        choice_keys = list(q['choices'].keys())
+        cols = st.columns(len(choice_keys))
+        for i, key in enumerate(choice_keys):
+            if cols[i].button(q['choices'][key]):
+                eff = q['eff'][key]
+                st.session_state.history.append({"title": q['title'], "choice": q['choices'][key], "key": key})
+                
+                # 🔔 일반 상황 스탯 변화 팝업
+                toast_msg = "📊 [국정 지표 변화] " + ", ".join([f"{k} {v:+}" for k, v in eff.items()])
+                st.toast(toast_msg)
+                
+                if sum(eff.values()) >= 0: st.balloons()
+                else: rain_effect()
+                
+                for k, v in eff.items(): st.session_state.stats[k] += v
+                st.session_state.step += 1; time.sleep(0.4); st.rerun()
 
-    elif q['type'] == "event":
-        try: prev = st.session_state.history[q['trigger_idx']]
-        except: prev = st.session_state.history[-1] if st.session_state.history else "A"
-        msg = q['A_res'] if prev == "A" else q['B_res']
-        eff = q['effA'] if prev == "A" else q['effB']
-        res_txt = ", ".join([f"{k} {v:+d}" for k, v in eff.items()])
-        if prev == "A": st.error(f"### ⚡ 긴급 상황!\n{msg}\n\n**변화:** {res_txt}"); st.markdown("<div class='warning-flash'></div>", unsafe_allow_html=True)
-        else: st.info(f"### ℹ️ 국정 보고\n{msg}\n\n**변화:** {res_txt}")
-        if st.button("상황을 확인했습니다 🆗", use_container_width=True):
-            for k, v in eff.items(): st.session_state.stats[k] += v
-            st.session_state.history.append("EVENT"); st.session_state.step += 1; st.rerun()
+    # 하단 스탯 표시
+    st.markdown("---")
+    st_cols = st.columns(5); stats_keys = list(st.session_state.stats.keys())
+    for i in range(10):
+        val = st.session_state.stats[stats_keys[i]]; cls = "danger-stat" if val <= -90 else ""
+        st_cols[i%5].markdown(f"<div class='stats-card {cls}'>{stats_keys[i]}<br>{val}</div>", unsafe_allow_html=True)
+
+# 🌟 결과 페이지
+else:
+    st.markdown("## 🏆 국정 운영 결과 분석")
+    
+    # 점수 타이핑 애니메이션
+    total_score = sum(st.session_state.stats.values())
+    placeholder = st.empty()
+    step_val = max(1, abs(total_score) // 20)
+    
+    for i in range(0, total_score, step_val if total_score >= 0 else -step_val):
+        placeholder.markdown(f"<div class='score-display'>최종 국가 스코어: {i}</div>", unsafe_allow_html=True)
+        time.sleep(0.05)
+    placeholder.markdown(f"<div class='score-display'>최종 국가 스코어: {total_score}</div>", unsafe_allow_html=True)
+    
+    st.balloons()
+    
+    # 그래프 시각화
+    df = pd.DataFrame(dict(r=list(st.session_state.stats.values()), theta=list(st.session_state.stats.keys())))
+    fig = px.line_polar(df, r='r', theta='theta', line_close=True, range_r=[-150, 150])
+    fig.update_traces(fill='toself', line_color='#1E3A8A')
+    st.plotly_chart(fig)
 
     st.markdown("---")
-    st_cols = st.columns(5)
-    keys = list(st.session_state.stats.keys())
-    for i in range(10): st_cols[i%5].markdown(f"<div class='stats-card'>{keys[i]}<br>{st.session_state.stats[keys[i]]}</div>", unsafe_allow_html=True)
-
-# [3단계: 최종 결과 및 심층 분석]
-else:
-    st.balloons()
-    total = sum(st.session_state.stats.values())
+    st.subheader("⚖️ 도덕적 가치 지향성 분석")
     
-    # 1. 상단 점수 대시보드
+    lib_votes = len([h for h in st.session_state.history if h['key'] == 'B'])
+    eq_votes = len([h for h in st.session_state.history if h['key'] == 'A'])
+    
+    if lib_votes > eq_votes:
+        st.info(f"**{st.session_state.student_info['name']} 지도자님은 '자유주의' 가치를 최우선으로 하십니다.**\n\n모든 선택의 저변에는 개인의 권리와 자율이 국가의 통제보다 중요하다는 신념이 깔려 있군요. {lib_votes}번의 선택에서 당신은 개인이 스스로의 삶을 결정할 자유를 수호했습니다.")
+    else:
+        st.success(f"**{st.session_state.student_info['name']} 지도자님은 '공동체적 평등' 가치를 최우선으로 하십니다.**\n\n당신은 사회적 약자를 보호하고 평등한 기회를 제공하는 것이 국가의 존재 이유라고 믿고 계시군요. {eq_votes}번의 선택에서 당신은 우리 사회가 함께 나아가는 가치를 선택했습니다.")
+
     st.markdown(f"""
-        <div style='text-align:center; background-color:#EBF5FF; padding:40px; border-radius:30px; border: 2px solid #1E3A8A;'>
-            <p style='font-size:20px; color:#1E3A8A; margin-bottom:5px;'>{st.session_state.student_info['id']} {st.session_state.student_info['name']} 지도자</p>
-            <h1 style='font-size:60px; margin:0;'>{st.session_state.student_info['nation']} 국력 점수: {total}점</h1>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    # 2. 방사형 그래프
-    df = pd.DataFrame(dict(r=list(st.session_state.stats.values()), theta=list(st.session_state.stats.keys())))
-    fig = px.line_polar(df, r='r', theta='theta', line_close=True)
-    fig.update_traces(fill='toself', line_color='#1E3A8A')
-    st.plotly_chart(fig, use_container_width=True)
-
-    # 3. 가치관 심층 분석 (A/B 선택 성향 분석)
-    # A선택: 성장, 효율, 국방, 기술중심, 자유주의
-    # B선택: 분배, 인권, 환경, 인간중심, 공동체주의
-    choices = [c for c in st.session_state.history if c in ["A", "B"]]
-    a_count = choices.count("A")
-    b_count = choices.count("B")
-    total_choices = len(choices)
-    
-    a_ratio = (a_count / total_choices * 100) if total_choices > 0 else 50
-    b_ratio = 100 - a_ratio
-
-    st.markdown("## 🧐 국정 운영 철학 보고서")
-    
-    # 성향 바 차트 시각화
-    st.write(f"**성장·효율 지향 (A)** {a_ratio:.1f}% vs **형평·인권 지향 (B)** {b_ratio:.1f}%")
-    st.progress(a_ratio / 100)
-
-    # (1) 메인 국가관 분석
-    col1, col2 = st.columns(2)
-    with col1:
-        if a_ratio > b_ratio:
-            st.markdown(f"""<div class='analysis-box' style='border-left-color: #007bff;'>
-            <h4>🚀 성장과 효율 중심의 리더</h4>
-            {st.session_state.student_info['name']}님은 국가의 덩치를 키우고 미래 기술을 확보하는 데 집중했습니다. 
-            <b>'파이를 먼저 키워야 한다'</b>는 신념으로 경쟁력을 강화한 결과, 강력한 국력을 가진 국가의 토대를 닦으셨네요!
-            </div>""", unsafe_allow_html=True)
-        else:
-            st.markdown(f"""<div class='analysis-box' style='border-left-color: #28a745;'>
-            <h4>🤝 형평과 인권 중심의 리더</h4>
-            {st.session_state.student_info['name']}님은 사회적 약자를 보호하고 환경과 인간의 존엄성을 지키는 데 집중했습니다. 
-            <b>'함께 가야 멀리 간다'</b>는 신념으로 국민의 삶의 질을 높인 따뜻한 복지 국가를 지향하셨군요!
-            </div>""", unsafe_allow_html=True)
-
-    with col2:
-        # (2) 정책 스타일 요약
-        if st.session_state.stats["법질서"] + st.session_state.stats["국방력"] > st.session_state.stats["개인의 자유"] + st.session_state.stats["환경지속성"]:
-            st.markdown(f"""<div class='analysis-box' style='border-left-color: #dc3545;'>
-            <h4>🛡️ 강력한 원칙주의 스타일</h4>
-            치안과 국방, 법질서를 확립하여 사회를 안정시키는 것을 우선시했습니다. 
-            혼란을 막고 국가의 기틀을 바로잡는 <b>'강한 지도자'</b>의 면모가 돋보입니다.
-            </div>""", unsafe_allow_html=True)
-        else:
-            st.markdown(f"""<div class='analysis-box' style='border-left-color: #ffc107;'>
-            <h4>🔓 유연한 자율주의 스타일</h4>
-            개인의 선택권과 환경, 시민의 목소리를 경청하는 것을 우선시했습니다. 
-            다양성을 존중하고 지속 가능한 성장을 고민하는 <b>'민주적 지도자'</b>의 성향이 강합니다.
-            </div>""", unsafe_allow_html=True)
-
-    # (3) 핵심 성찰 질문 (수업 마무리용)
-    st.info(f"""
-    **💡 {st.session_state.student_info['name']} 지도자를 위한 질문:**
-    1. 가장 고민되었던 선택은 무엇인가요? 그때 포기한 가치는 무엇이었나요?
-    2. 국가의 점수가 높다고 해서 반드시 모든 국민이 행복할까요?
-    3. 우리 사회에서 'A'와 'B'의 가치가 충돌할 때, 지도자는 어떤 역할을 해야 할까요?
+    > **선생님의 한 마디:** {st.session_state.student_info['name']}님, 이 시뮬레이션을 통해 당신이 지키고자 했던 가치는 무엇이며, 
+    > 점수를 위해 어쩔 수 없이 포기해야 했던 가치는 무엇이었나요? 
+    > 결과 페이지의 스탯 그래프를 보고, **가장 낮은 점수를 기록한 분야**가 왜 그렇게 되었는지 학습지에 성찰해 보세요.
     """)
 
-    if st.button("처음으로 돌아가기", use_container_width=True):
+    if st.button("새로운 역사 시작"):
         for k in list(st.session_state.keys()): del st.session_state[k]
         st.rerun()
